@@ -1,0 +1,11 @@
+--- a/software/sys_controller/ic_drivers/it6613/typedef.h
++++ b/software/sys_controller/ic_drivers/it6613/typedef.h
+@@ -34,7 +34,7 @@
+ typedef unsigned long ulong,*pulong ;
+ typedef unsigned long ULONG,*PULONG ;
+ typedef unsigned long dword,*pdword ;
+-typedef unsigned long DWORD,*PDWORD ;
++typedef unsigned int DWORD,*PDWORD ;
+ 
+ #define FALSE 0
+ #define TRUE 1

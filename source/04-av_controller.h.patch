@@ -1,0 +1,49 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/inc/av_controller.h b/software/sys_controller/inc/av_controller.h
+--- a/software/sys_controller/inc/av_controller.h	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/inc/av_controller.h	2026-08-07 19:26:59.246529315 +0000
+@@ -101,6 +101,16 @@
+     uint8_t osd_status_timeout;
+     uint8_t osd_highlight_color;
+     uint8_t phase_hotkey_enable;
++    /* Optional automatic profile selection by detected input mode class.
++     * Profile value 15 means "disabled / no mapping". */
++    uint8_t mode_profile_enable;
++    uint8_t mode_profile_240p;
++    uint8_t mode_profile_400p;
++    uint8_t mode_profile_480i;
++    uint8_t mode_profile_480p;
++    uint8_t mode_profile_720p;
++    uint8_t mode_profile_1080i;
++    uint8_t mode_profile_1080p;
+ } settings_t;
+ 
+ typedef struct {
+@@ -144,9 +154,13 @@
+ 
+ void set_default_c_shmask();
+ void set_default_c_lc_palette_set();
++void set_default_settings();
+ 
+ void print_vm_stats();
+ int latency_test();
++int copy_profile();
++int backup_profiles();
++int restore_profiles();
+ 
+ void update_sc_config();
+ 
+--- a/software/sys_controller/inc/av_controller.h
++++ b/software/sys_controller/inc/av_controller.h
+@@ -111,6 +111,12 @@
+     uint8_t mode_profile_720p;
+     uint8_t mode_profile_1080i;
+     uint8_t mode_profile_1080p;
++    /* CU4 optional overrides.  INIT_CONFIG_SLOT means inherit the legacy
++     * base mapping above, preserving behaviour of existing 1.21 configs. */
++    uint8_t mode_profile_288p;
++    uint8_t mode_profile_576i;
++    uint8_t mode_profile_576p;
++    uint8_t mode_profile_atari_high;
+ } settings_t;
+ 
+ typedef struct {

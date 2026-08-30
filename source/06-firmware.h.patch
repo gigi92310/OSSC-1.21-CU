@@ -1,0 +1,23 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/inc/firmware.h b/software/sys_controller/inc/firmware.h
+--- a/software/sys_controller/inc/firmware.h	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/inc/firmware.h	2026-08-07 19:30:09.081949253 +0000
+@@ -29,7 +29,7 @@
+ #ifdef OSDLANG_JP
+ #define FW_SUFFIX              "j"
+ #else
+-#define FW_SUFFIX              ""
++#define FW_SUFFIX              "cu3"
+ #endif
+ 
+ typedef struct {
+--- a/software/sys_controller/inc/firmware.h
++++ b/software/sys_controller/inc/firmware.h
+@@ -29,7 +29,7 @@
+ #ifdef OSDLANG_JP
+ #define FW_SUFFIX              "j"
+ #else
+-#define FW_SUFFIX              "cu3"
++#define FW_SUFFIX              "cu4"
+ #endif
+ 
+ typedef struct {

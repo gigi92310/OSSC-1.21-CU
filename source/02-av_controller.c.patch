@@ -1,0 +1,400 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/av_controller.c b/software/sys_controller/av_controller.c
+--- a/software/sys_controller/av_controller.c	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/av_controller.c	2026-08-07 19:26:59.246373924 +0000
+@@ -80,9 +80,17 @@
+     .osd_status_timeout = 1,
+     .osd_highlight_color = 4,
+     .auto_av2_ypbpr = 1,
++    .mode_profile_240p = INIT_CONFIG_SLOT,
++    .mode_profile_400p = INIT_CONFIG_SLOT,
++    .mode_profile_480i = INIT_CONFIG_SLOT,
++    .mode_profile_480p = INIT_CONFIG_SLOT,
++    .mode_profile_720p = INIT_CONFIG_SLOT,
++    .mode_profile_1080i = INIT_CONFIG_SLOT,
++    .mode_profile_1080p = INIT_CONFIG_SLOT,
+ };
+ 
+ alt_u8 profile_sel, profile_sel_menu, sd_profile_sel_menu, input_profiles[AV_LAST], lt_sel;
++alt_u8 profile_copy_src_menu, profile_copy_dst_menu;
+ 
+ char row1[LCD_ROW_LEN+1], row2[LCD_ROW_LEN+1], menu_row1[LCD_ROW_LEN+1], menu_row2[LCD_ROW_LEN+1];
+ 
+@@ -384,24 +392,60 @@
+     }
+ 
+     if (sync_active && valid_mode) {
+-        if ((totlines != cm.totlines) ||
++        static alt_u32 cand_totlines, cand_pcnt_field;
++        static alt_u8 cand_progressive, cand_hsync_width, mode_change_ctr;
++        alt_u8 input_mode_changed;
++
++        input_mode_changed = ((totlines != cm.totlines) ||
+             (progressive != cm.progressive) ||
+             (pcnt_field < (cm.pcnt_field - PCNT_TOLERANCE)) ||
+             (pcnt_field > (cm.pcnt_field + PCNT_TOLERANCE)) ||
+-            (abs(((int)hsync_width - (int)cm.hsync_width)) > HSYNC_WIDTH_TOLERANCE)) {
+-            printf("totlines: %lu (cur) / %lu (prev), pcnt_field: %lu (cur) / %lu (prev), hsync_width: %lu (cur) / %lu (prev)\n", totlines, cm.totlines, pcnt_field, cm.pcnt_field, hsync_width, cm.hsync_width);
++            (abs(((int)hsync_width - (int)cm.hsync_width)) > HSYNC_WIDTH_TOLERANCE));
+ 
+-            status = (status < MODE_CHANGE) ? MODE_CHANGE : status;
++        /* On first sync, accept measurements immediately.  Afterwards require
++         * three coherent polls (~30 ms) before declaring a real mode change. */
++        if (status == ACTIVITY_CHANGE) {
++            mode_change_ctr = 0;
++            cm.totlines = totlines;
++            cm.clkcnt = clkcnt;
++            cm.pcnt_field = pcnt_field;
++            cm.hsync_width = hsync_width;
++            cm.progressive = progressive;
++        } else if (input_mode_changed) {
++            if ((mode_change_ctr != 0) && (totlines == cand_totlines) &&
++                (progressive == cand_progressive) &&
++                (abs((int)pcnt_field-(int)cand_pcnt_field) <= PCNT_TOLERANCE) &&
++                (abs((int)hsync_width-(int)cand_hsync_width) <= HSYNC_WIDTH_TOLERANCE)) {
++                mode_change_ctr++;
++            } else {
++                cand_totlines = totlines;
++                cand_pcnt_field = pcnt_field;
++                cand_progressive = progressive;
++                cand_hsync_width = hsync_width;
++                mode_change_ctr = 1;
++            }
++
++            if (mode_change_ctr >= 3) {
++                printf("Mode stable: %lu lines, pcnt %lu, hsw %u\n", totlines, pcnt_field, hsync_width);
++                cm.totlines = totlines;
++                cm.clkcnt = clkcnt;
++                cm.pcnt_field = pcnt_field;
++                cm.hsync_width = hsync_width;
++                cm.progressive = progressive;
++                mode_change_ctr = 0;
++                status = (status < MODE_CHANGE) ? MODE_CHANGE : status;
++            }
++        } else {
++            mode_change_ctr = 0;
++            cm.totlines = totlines;
++            cm.clkcnt = clkcnt;
++            cm.pcnt_field = pcnt_field;
++            cm.hsync_width = hsync_width;
++            cm.progressive = progressive;
+         }
+ 
+         if (memcmp(&tc, &cm.cc, offsetof(avconfig_t, sl_mode)) || (update_cur_vm == 1))
+             status = (status < MODE_CHANGE) ? MODE_CHANGE : status;
+-
+-        cm.totlines = totlines;
+-        cm.clkcnt = clkcnt;
+-        cm.pcnt_field = pcnt_field;
+-        cm.hsync_width = hsync_width;
+-        cm.progressive = progressive;
+     }
+ 
+     if (memcmp(&tc.sl_mode, &cm.cc.sl_mode, offsetof(avconfig_t, sync_vth) - offsetof(avconfig_t, sl_mode)))
+@@ -626,6 +670,38 @@
+     sc->sl_config3 = sl_config3;
+ }
+ 
++/* Select an optional profile from the measured input class.  15 means no
++ * mapping.  This deliberately uses sync geometry only: modes that share the
++ * same sync (for example Atari ST low/medium) remain one class. */
++static void auto_profile_mode() {
++    uint8_t p = INIT_CONFIG_SLOT;
++    uint32_t v_hz_x100;
++
++    if (!ts.mode_profile_enable || !cm.sync_active || !cm.pcnt_field)
++        return;
++
++    v_hz_x100 = (100*TVP_EXTCLK_HZ)/cm.pcnt_field;
++
++    if (!cm.progressive) {
++        p = (cm.totlines > 700) ? ts.mode_profile_1080i : ts.mode_profile_480i;
++    } else if (cm.totlines <= 360) {
++        p = ts.mode_profile_240p;
++    } else if ((cm.totlines <= 450) || ((cm.totlines <= 550) && (v_hz_x100 >= 6500))) {
++        /* Includes 384/400p and ~70 Hz computer modes such as Atari ST HIGH
++         * (typically reported around 501p / 71 Hz by the OSSC). */
++        p = ts.mode_profile_400p;
++    } else if (cm.totlines <= 625) {
++        p = ts.mode_profile_480p;
++    } else if (cm.totlines <= 800) {
++        p = ts.mode_profile_720p;
++    } else {
++        p = ts.mode_profile_1080p;
++    }
++
++    if ((p <= MAX_PROFILE) && (p != profile_sel) && (read_userdata(p, 0) == 0))
++        profile_sel = p;
++}
++
+ // Configure TVP7002 and scan converter logic based on the video mode
+ void program_mode()
+ {
+@@ -807,6 +883,35 @@
+     return retval;
+ }
+ 
++int erase_profile() {
++    return erase_userdata(profile_sel_menu);
++}
++
++int copy_profile() {
++    int retval = copy_userdata(profile_copy_src_menu, profile_copy_dst_menu);
++    if ((retval == 0) && (profile_copy_dst_menu == profile_sel))
++        read_userdata(profile_sel, 0);
++    return retval;
++}
++
++int backup_profiles() {
++    return backup_userdata_all();
++}
++
++int restore_profiles() {
++    int retval = restore_userdata_all();
++    if (retval == 0) {
++        set_default_settings();
++        read_userdata(INIT_CONFIG_SLOT, 0);
++        profile_sel = input_profiles[ts.profile_link ? cm.avinput : AV_TESTPAT];
++        if (profile_sel > MAX_PROFILE)
++            profile_sel = 0;
++        read_userdata(profile_sel, 0);
++        update_settings(1);
++    }
++    return retval;
++}
++
+ void set_default_settings() {
+     memcpy(&ts, &ts_default, sizeof(settings_t));
+     set_default_keymap();
+@@ -921,12 +1026,26 @@
+ 
+ void print_vm_stats() {
+     int row = 0;
++    uint32_t in_v_hz_x100 = 0, in_h_hz = 0;
+ 
+     if (!menu_active) {
+         memset((void*)osd->osd_array.data, 0, sizeof(osd_char_array));
+         read_userdata(profile_sel, 1);
+ 
+-        sniprintf((char*)osd->osd_array.data[row][0], OSD_CHAR_COLS, "Mode preset:");
++        if (cm.pcnt_field && cm.totlines) {
++            in_v_hz_x100 = (100*TVP_EXTCLK_HZ)/cm.pcnt_field;
++            in_h_hz = (100*TVP_EXTCLK_HZ)/((100*cm.pcnt_field*(1+!cm.progressive))/cm.totlines);
++        }
++
++        sniprintf((char*)osd->osd_array.data[row][0], OSD_CHAR_COLS, "Input:");
++        sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u%c clk%u", (unsigned)cm.totlines, cm.progressive ? 'p' : 'i', (unsigned)cm.clkcnt);
++        sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Input V freq:");
++        sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u.%.2uHz", (unsigned)(in_v_hz_x100/100), (unsigned)(in_v_hz_x100%100));
++        sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Input H freq:");
++        sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u.%.2ukHz", (unsigned)(in_h_hz/1000), (unsigned)((in_h_hz%1000)/10));
++        sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Input HS width:");
++        sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u", (unsigned)cm.hsync_width);
++        sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Mode preset:");
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%s", vmode_out.name);
+         sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Refresh rate:");
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u.%.2uHz", vmode_out.timings.v_hz_x100/100, vmode_out.timings.v_hz_x100%100);
+@@ -940,6 +1059,8 @@
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%-5u %-5u", vmode_out.timings.h_total, vmode_out.timings.v_total);
+         row++;
+ 
++        sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Out pclk:");
++        sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u.%uMHz", (unsigned)(cm.pclk_o_hz/1000000), (unsigned)((cm.pclk_o_hz/100000)%10));
+         sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Profile:");
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u: %s", profile_sel, (target_profile_name[0] == 0) ? "<empty>" : target_profile_name);
+         sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "FW:");
+@@ -1291,6 +1412,7 @@
+                     sys_ctrl |= VIDGEN_OFF;
+                     IOWR_ALTERA_AVALON_PIO_DATA(PIO_0_BASE, sys_ctrl);
+                     tvp_powerup();
++                    auto_profile_mode();
+                     program_mode();
+                     SetupAudio(cm.cc.tx_mode);
+                 } else {
+@@ -1310,6 +1432,7 @@
+             case MODE_CHANGE:
+                 if (cm.sync_active) {
+                     printf("Mode change\n");
++                    auto_profile_mode();
+                     program_mode();
+                 }
+                 break;
+--- a/software/sys_controller/av_controller.c
++++ b/software/sys_controller/av_controller.c
+@@ -87,6 +87,10 @@
+     .mode_profile_720p = INIT_CONFIG_SLOT,
+     .mode_profile_1080i = INIT_CONFIG_SLOT,
+     .mode_profile_1080p = INIT_CONFIG_SLOT,
++    .mode_profile_288p = INIT_CONFIG_SLOT,
++    .mode_profile_576i = INIT_CONFIG_SLOT,
++    .mode_profile_576p = INIT_CONFIG_SLOT,
++    .mode_profile_atari_high = INIT_CONFIG_SLOT,
+ };
+ 
+ alt_u8 profile_sel, profile_sel_menu, sd_profile_sel_menu, input_profiles[AV_LAST], lt_sel;
+@@ -670,36 +674,124 @@
+     sc->sl_config3 = sl_config3;
+ }
+ 
+-/* Select an optional profile from the measured input class.  15 means no
+- * mapping.  This deliberately uses sync geometry only: modes that share the
+- * same sync (for example Atari ST low/medium) remain one class. */
+-static void auto_profile_mode() {
+-    uint8_t p = INIT_CONFIG_SLOT;
+-    uint32_t v_hz_x100;
+-
+-    if (!ts.mode_profile_enable || !cm.sync_active || !cm.pcnt_field)
+-        return;
++typedef enum {
++    AUTO_CLASS_NONE = 0,
++    AUTO_CLASS_240P,
++    AUTO_CLASS_288P,
++    AUTO_CLASS_400P,
++    AUTO_CLASS_ATARI_HIGH,
++    AUTO_CLASS_480I,
++    AUTO_CLASS_576I,
++    AUTO_CLASS_480P,
++    AUTO_CLASS_576P,
++    AUTO_CLASS_720P,
++    AUTO_CLASS_1080I,
++    AUTO_CLASS_1080P,
++} auto_profile_class_t;
++
++static const char *auto_profile_class_name(auto_profile_class_t cls) {
++    switch (cls) {
++    case AUTO_CLASS_240P:       return "240p";
++    case AUTO_CLASS_288P:       return "288p";
++    case AUTO_CLASS_400P:       return "384/400p";
++    case AUTO_CLASS_ATARI_HIGH: return "Atari ST HIGH";
++    case AUTO_CLASS_480I:       return "480i";
++    case AUTO_CLASS_576I:       return "576i";
++    case AUTO_CLASS_480P:       return "480p";
++    case AUTO_CLASS_576P:       return "576p";
++    case AUTO_CLASS_720P:       return "720p";
++    case AUTO_CLASS_1080I:      return "1080i";
++    case AUTO_CLASS_1080P:      return "1080p";
++    default:                    return "No sync";
++    }
++}
+ 
+-    v_hz_x100 = (100*TVP_EXTCLK_HZ)/cm.pcnt_field;
++/* CU4 mode classifier.  It keeps the original 1.21 base mappings and adds
++ * optional PAL / Atari overrides.  An override set to INIT_CONFIG_SLOT
++ * inherits its legacy base mapping, so old INITCFG data behaves unchanged. */
++static auto_profile_class_t auto_profile_classify(uint32_t *v_hz_x100) {
++    uint32_t vf = 0;
++
++    if (!cm.sync_active || !cm.pcnt_field || !cm.totlines) {
++        if (v_hz_x100)
++            *v_hz_x100 = 0;
++        return AUTO_CLASS_NONE;
++    }
++
++    vf = (100*TVP_EXTCLK_HZ)/cm.pcnt_field;
++    if (v_hz_x100)
++        *v_hz_x100 = vf;
+ 
+     if (!cm.progressive) {
+-        p = (cm.totlines > 700) ? ts.mode_profile_1080i : ts.mode_profile_480i;
+-    } else if (cm.totlines <= 360) {
+-        p = ts.mode_profile_240p;
+-    } else if ((cm.totlines <= 450) || ((cm.totlines <= 550) && (v_hz_x100 >= 6500))) {
+-        /* Includes 384/400p and ~70 Hz computer modes such as Atari ST HIGH
+-         * (typically reported around 501p / 71 Hz by the OSSC). */
+-        p = ts.mode_profile_400p;
+-    } else if (cm.totlines <= 625) {
+-        p = ts.mode_profile_480p;
+-    } else if (cm.totlines <= 800) {
+-        p = ts.mode_profile_720p;
+-    } else {
+-        p = ts.mode_profile_1080p;
++        if (cm.totlines > 700)
++            return AUTO_CLASS_1080I;
++        return (cm.totlines > 575) ? AUTO_CLASS_576I : AUTO_CLASS_480I;
++    }
++
++    /* Atari ST HIGH is normally seen around 501p / 71 Hz.  Keep the window
++     * deliberately narrow so ordinary 480p computer timings are not stolen. */
++    if ((cm.totlines >= 490) && (cm.totlines <= 520) &&
++        (vf >= 6800) && (vf <= 7400))
++        return AUTO_CLASS_ATARI_HIGH;
++
++    if (cm.totlines <= 285)
++        return AUTO_CLASS_240P;
++    if (cm.totlines <= 360)
++        return AUTO_CLASS_288P;
++    if (cm.totlines <= 450)
++        return AUTO_CLASS_400P;
++    if (cm.totlines <= 550)
++        return AUTO_CLASS_480P;
++    if (cm.totlines <= 650)
++        return AUTO_CLASS_576P;
++    if (cm.totlines <= 800)
++        return AUTO_CLASS_720P;
++    return AUTO_CLASS_1080P;
++}
++
++static uint8_t auto_profile_target(auto_profile_class_t cls) {
++    switch (cls) {
++    case AUTO_CLASS_240P:
++        return ts.mode_profile_240p;
++    case AUTO_CLASS_288P:
++        return (ts.mode_profile_288p <= MAX_PROFILE) ? ts.mode_profile_288p : ts.mode_profile_240p;
++    case AUTO_CLASS_400P:
++        return ts.mode_profile_400p;
++    case AUTO_CLASS_ATARI_HIGH:
++        return (ts.mode_profile_atari_high <= MAX_PROFILE) ? ts.mode_profile_atari_high : ts.mode_profile_400p;
++    case AUTO_CLASS_480I:
++        return ts.mode_profile_480i;
++    case AUTO_CLASS_576I:
++        return (ts.mode_profile_576i <= MAX_PROFILE) ? ts.mode_profile_576i : ts.mode_profile_480i;
++    case AUTO_CLASS_480P:
++        return ts.mode_profile_480p;
++    case AUTO_CLASS_576P:
++        return (ts.mode_profile_576p <= MAX_PROFILE) ? ts.mode_profile_576p : ts.mode_profile_480p;
++    case AUTO_CLASS_720P:
++        return ts.mode_profile_720p;
++    case AUTO_CLASS_1080I:
++        return ts.mode_profile_1080i;
++    case AUTO_CLASS_1080P:
++        return ts.mode_profile_1080p;
++    default:
++        return INIT_CONFIG_SLOT;
+     }
++}
+ 
+-    if ((p <= MAX_PROFILE) && (p != profile_sel) && (read_userdata(p, 0) == 0))
++static void auto_profile_mode() {
++    auto_profile_class_t cls;
++    uint8_t p;
++
++    if (!ts.mode_profile_enable)
++        return;
++
++    cls = auto_profile_classify(NULL);
++    p = auto_profile_target(cls);
++
++    if ((p <= MAX_PROFILE) && (p != profile_sel) && (read_userdata(p, 0) == 0)) {
++        printf("Auto profile: %s -> %u\n", auto_profile_class_name(cls), p);
+         profile_sel = p;
++    }
+ }
+ 
+ // Configure TVP7002 and scan converter logic based on the video mode
+@@ -1063,6 +1155,17 @@
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u.%uMHz", (unsigned)(cm.pclk_o_hz/1000000), (unsigned)((cm.pclk_o_hz/100000)%10));
+         sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Profile:");
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u: %s", profile_sel, (target_profile_name[0] == 0) ? "<empty>" : target_profile_name);
++        {
++            auto_profile_class_t ap_cls = auto_profile_classify(NULL);
++            uint8_t ap_target = auto_profile_target(ap_cls);
++            sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Auto class:");
++            sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%s", auto_profile_class_name(ap_cls));
++            sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "Auto target:");
++            if (ap_target <= MAX_PROFILE)
++                sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u%s", ap_target, ts.mode_profile_enable ? "" : " (off)");
++            else
++                sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%s", ts.mode_profile_enable ? "No mapping" : "Off");
++        }
+         sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "FW:");
+         sniprintf((char*)osd->osd_array.data[row][1], OSD_CHAR_COLS, "%u.%.2u" FW_SUFFIX, FW_VER_MAJOR, FW_VER_MINOR);
+         sniprintf((char*)osd->osd_array.data[++row][0], OSD_CHAR_COLS, "FW date:");

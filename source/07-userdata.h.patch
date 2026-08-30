@@ -1,0 +1,14 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/inc/userdata.h b/software/sys_controller/inc/userdata.h
+--- a/software/sys_controller/inc/userdata.h	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/inc/userdata.h	2026-08-07 19:26:59.246771876 +0000
+@@ -56,6 +56,10 @@
+ } ude_item_map;
+ 
+ int write_userdata(uint8_t entry);
++int erase_userdata(uint8_t entry);
++int copy_userdata(uint8_t src, uint8_t dst);
++int backup_userdata_all();
++int restore_userdata_all();
+ int read_userdata(uint8_t entry, int dry_run);
+ int write_userdata_sd(uint8_t entry);
+ int read_userdata_sd(uint8_t entry, int dry_run);

@@ -1,0 +1,49 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/src/firmware.c b/software/sys_controller/src/firmware.c
+--- a/software/sys_controller/src/firmware.c	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/src/firmware.c	2026-08-07 19:26:59.246935580 +0000
+@@ -37,6 +37,7 @@
+ #define SECONDARY_FW_ADDR 0x00080000
+ #define FW_FINGERPRINT 0xEFEFEF56
+ #define FW_FINGERPRINT_OFFSET 0x20
++#define FW_SD_READ_RETRIES 3
+ 
+ extern char menu_row1[LCD_ROW_LEN+1], menu_row2[LCD_ROW_LEN+1];
+ extern alt_u16 rc_keymap[REMOTE_MAX_KEYS];
+@@ -173,11 +174,18 @@
+         printf("Checking copied data...\n");
+         while (bytes_to_copy > 0) {
+             bytes_read = (bytes_to_copy > SD_BLK_SIZE) ? SD_BLK_SIZE : bytes_to_copy;
+-            res = SD_Read(&sdcard_dev, tmpbuf, ((cluster_idx[cl_iter]-2)*fs_csize+fs_startsec+cl_soffs), 0, bytes_read);
+-            if (res != SD_OK) {
+-                printf("FW data read error\n");
+-                retval = -8;
+-                goto close_file;
++            {
++                int retry;
++                for (retry=0; retry<FW_SD_READ_RETRIES; retry++) {
++                    res = SD_Read(&sdcard_dev, tmpbuf, ((cluster_idx[cl_iter]-2)*fs_csize+fs_startsec+cl_soffs), 0, bytes_read);
++                    if (res == SD_OK)
++                        break;
++                }
++                if (res != SD_OK) {
++                    printf("FW data read error after retries\n");
++                    retval = -8;
++                    goto close_file;
++                }
+             }
+ 
+             crcval = crc32((unsigned char *)&tmpbuf, bytes_read, (bytes_to_copy==hdr.data_len));
+@@ -252,8 +260,11 @@
+     // Write data
+     while (bytes_to_copy > 0) {
+         bytes_read = (bytes_to_copy > SD_BLK_SIZE) ? SD_BLK_SIZE : bytes_to_copy;
+-        res = SD_Read(&sdcard_dev, tmpbuf, ((cluster_idx[cl_iter]-2)*fs_csize+fs_startsec+cl_soffs), 0, bytes_read);
+-        //TODO: retry if read fails
++        /* Once flash erase has started we must never consume stale tmpbuf.
++         * Retry the same SD sector until it is read successfully. */
++        do {
++            res = SD_Read(&sdcard_dev, tmpbuf, ((cluster_idx[cl_iter]-2)*fs_csize+fs_startsec+cl_soffs), 0, bytes_read);
++        } while (res != SD_OK);
+ 
+         bytes_to_copy -= bytes_read;
+         for (i=0; i<bytes_read; i++)

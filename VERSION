@@ -1,0 +1,5 @@
+OSSC Classic 1.21-cu4
+Firmware slot: Primary / FW1
+Updater key: OSSC
+FPGA / Ibex boot address: 0x02050000
+Software flash origin: 0x02050000

@@ -1,0 +1,11 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/inc/avconfig.h b/software/sys_controller/inc/avconfig.h
+--- a/software/sys_controller/inc/avconfig.h	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/inc/avconfig.h	2026-08-07 19:26:59.246623335 +0000
+@@ -163,6 +163,7 @@
+ int reset_profile();
+ int load_profile();
+ int save_profile();
++int erase_profile();
+ int load_profile_sd();
+ int save_profile_sd();
+ 

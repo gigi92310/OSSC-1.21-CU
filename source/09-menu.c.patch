@@ -1,0 +1,82 @@
+diff -ruN '--exclude=obj' '--exclude=*.o' '--exclude=*.a' '--exclude=*.elf' '--exclude=*.map' '--exclude=*.d' a/software/sys_controller/src/menu.c b/software/sys_controller/src/menu.c
+--- a/software/sys_controller/src/menu.c	2026-03-07 21:47:28.000000000 +0000
++++ b/software/sys_controller/src/menu.c	2026-08-07 19:26:59.247077771 +0000
+@@ -42,6 +42,7 @@
+ extern alt_u32 remote_code;
+ extern alt_u16 rc_keymap[REMOTE_MAX_KEYS];
+ extern alt_u8 vm_sel, profile_sel_menu, sd_profile_sel_menu, lt_sel;
++extern alt_u8 profile_copy_src_menu, profile_copy_dst_menu;
+ extern alt_u8 update_cur_vm;
+ extern uint8_t sl_def_iv_x, sl_def_iv_y;
+ extern char target_profile_name[USERDATA_NAME_LEN+1];
+@@ -113,6 +114,7 @@
+ static void vm_display_name (alt_u8 v) { strncpy(menu_row2, video_modes_plm[v].name, LCD_ROW_LEN+1); }
+ static void link_av_desc (avinput_t v) { strncpy(menu_row2, v == AV_LAST ? "No link" : avinput_str[v], LCD_ROW_LEN+1); }
+ static void profile_disp(uint8_t v) { sniprintf(menu_row2, LCD_ROW_LEN+1, "%u: %s", v, (read_userdata(v, 1) != 0) ? "<empty>" : target_profile_name); }
++static void mode_profile_disp(uint8_t v) { if (v > MAX_PROFILE) strlcpy(menu_row2, "Off", LCD_ROW_LEN+1); else profile_disp(v); }
+ static void sd_profile_disp(uint8_t v) { sniprintf(menu_row2, LCD_ROW_LEN+1, "%u: %s", v, (read_userdata_sd(v, 1) != 0) ? "<empty>" : target_profile_name); }
+ static void alc_v_filter_disp(alt_u8 v) { sniprintf(menu_row2, LCD_ROW_LEN+1, LNG("%u lines","%u ﾗｲﾝ"), (1<<v)); }
+ static void alc_h_filter_disp(alt_u8 v) { sniprintf(menu_row2, LCD_ROW_LEN+1, LNG("%u pixels","%u ﾄﾞｯﾄ"), (1<<(v+1))); }
+@@ -255,6 +257,17 @@
+ }))
+ #define AUDIO_MENU { LNG("Audio options  >","ｵｰﾃﾞｨｵｵﾌﾟｼｮﾝ     >"),                  OPT_SUBMENU,            { .sub = { &menu_audio, NULL, NULL } } },
+ 
++MENU(menu_mode_profiles, P99_PROTECT({ \
++    { "Auto mode prof.",                        OPT_AVCONFIG_SELECTION, { .sel = { &ts.mode_profile_enable, OPT_WRAP, SETTING_ITEM(off_on_desc) } } },
++    { "240/288p prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_240p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "384/400p prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_400p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "480/576i prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_480i, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "480/576p prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_480p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "720p prof.",                             OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_720p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "1080i prof.",                            OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_1080i, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "1080p prof.",                            OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_1080p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++}))
++
+ MENU(menu_settings, P99_PROTECT({ \
+     { LNG("Link prof->input","Link prof->input"), OPT_AVCONFIG_NUMVALUE,  { .num = { &tc.link_av,  OPT_WRAP, AV1_RGBs, AV_LAST, link_av_desc } } },
+     { LNG("Link input->prof","Link input->prof"),   OPT_AVCONFIG_SELECTION, { .sel = { &ts.profile_link,  OPT_WRAP, SETTING_ITEM(off_on_desc) } } },
+@@ -268,8 +281,15 @@
+     { "OSD status disp.",                       OPT_AVCONFIG_SELECTION, { .sel = { &ts.osd_status_timeout,   OPT_WRAP,   SETTING_ITEM(osd_status_desc) } } },
+     { "OSD cursor color",                       OPT_AVCONFIG_SELECTION, { .sel = { &ts.osd_highlight_color,   OPT_WRAP,   SETTING_ITEM(osd_color_desc) } } },
+     { "Phase hotkey",                           OPT_AVCONFIG_SELECTION, { .sel = { &ts.phase_hotkey_enable,  OPT_WRAP, SETTING_ITEM(off_on_desc) } } },
++    { "Mode profiles   >",                     OPT_SUBMENU,            { .sub = { &menu_mode_profiles, NULL, NULL } } },
+     { LNG("<Load profile >","<ﾌﾟﾛﾌｧｲﾙﾛｰﾄﾞ    >"),   OPT_FUNC_CALL,         { .fun = { load_profile, &profile_arg_info } } },
+     { LNG("<Save profile >","<ﾌﾟﾛﾌｧｲﾙｾｰﾌﾞ    >"),  OPT_FUNC_CALL,          { .fun = { save_profile, &profile_arg_info } } },
++    { "<Erase profile>" ,                        OPT_FUNC_CALL,          { .fun = { erase_profile, &profile_arg_info } } },
++    { "Copy source",                            OPT_AVCONFIG_NUMVALUE,  { .num = { &profile_copy_src_menu, OPT_NOWRAP, 0, MAX_PROFILE, profile_disp } } },
++    { "Copy dest",                              OPT_AVCONFIG_NUMVALUE,  { .num = { &profile_copy_dst_menu, OPT_NOWRAP, 0, MAX_PROFILE, profile_disp } } },
++    { "<Copy profile >",                        OPT_FUNC_CALL,          { .fun = { copy_profile, NULL } } },
++    { "<Backup all   >",                        OPT_FUNC_CALL,          { .fun = { backup_profiles, NULL } } },
++    { "<Restore all  >",                        OPT_FUNC_CALL,          { .fun = { restore_profiles, NULL } } },
+     { "<SD Load profile>" ,                      OPT_FUNC_CALL,          { .fun = { load_profile_sd, &sd_profile_arg_info } } },
+     { "<SD Save profile>" ,                      OPT_FUNC_CALL,          { .fun = { save_profile_sd, &sd_profile_arg_info } } },
+     { LNG("<Reset profile>","<ｾｯﾃｲｦｼｮｷｶ    >"),  OPT_FUNC_CALL,          { .fun = { reset_profile, NULL } } },
+--- a/software/sys_controller/src/menu.c
++++ b/software/sys_controller/src/menu.c
+@@ -115,6 +115,7 @@
+ static void link_av_desc (avinput_t v) { strncpy(menu_row2, v == AV_LAST ? "No link" : avinput_str[v], LCD_ROW_LEN+1); }
+ static void profile_disp(uint8_t v) { sniprintf(menu_row2, LCD_ROW_LEN+1, "%u: %s", v, (read_userdata(v, 1) != 0) ? "<empty>" : target_profile_name); }
+ static void mode_profile_disp(uint8_t v) { if (v > MAX_PROFILE) strlcpy(menu_row2, "Off", LCD_ROW_LEN+1); else profile_disp(v); }
++static void mode_profile_override_disp(uint8_t v) { if (v > MAX_PROFILE) strlcpy(menu_row2, "Base mapping", LCD_ROW_LEN+1); else profile_disp(v); }
+ static void sd_profile_disp(uint8_t v) { sniprintf(menu_row2, LCD_ROW_LEN+1, "%u: %s", v, (read_userdata_sd(v, 1) != 0) ? "<empty>" : target_profile_name); }
+ static void alc_v_filter_disp(alt_u8 v) { sniprintf(menu_row2, LCD_ROW_LEN+1, LNG("%u lines","%u ﾗｲﾝ"), (1<<v)); }
+ static void alc_h_filter_disp(alt_u8 v) { sniprintf(menu_row2, LCD_ROW_LEN+1, LNG("%u pixels","%u ﾄﾞｯﾄ"), (1<<(v+1))); }
+@@ -259,10 +260,14 @@
+ 
+ MENU(menu_mode_profiles, P99_PROTECT({ \
+     { "Auto mode prof.",                        OPT_AVCONFIG_SELECTION, { .sel = { &ts.mode_profile_enable, OPT_WRAP, SETTING_ITEM(off_on_desc) } } },
+-    { "240/288p prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_240p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
+-    { "384/400p prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_400p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
+-    { "480/576i prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_480i, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
+-    { "480/576p prof.",                         OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_480p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "240/288p base",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_240p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "288p override",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_288p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_override_disp } } },
++    { "384/400p base",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_400p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "ST HIGH over.",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_atari_high, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_override_disp } } },
++    { "480/576i base",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_480i, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "576i override",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_576i, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_override_disp } } },
++    { "480/576p base",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_480p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
++    { "576p override",                          OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_576p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_override_disp } } },
+     { "720p prof.",                             OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_720p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
+     { "1080i prof.",                            OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_1080i, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
+     { "1080p prof.",                            OPT_AVCONFIG_NUMVALUE,  { .num = { &ts.mode_profile_1080p, OPT_NOWRAP, 0, INIT_CONFIG_SLOT, mode_profile_disp } } },
